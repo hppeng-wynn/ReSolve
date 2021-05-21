@@ -450,167 +450,274 @@ class Builder:
 
     def solveskillpoints(self):
         # Skillpoints Calculation
-
-        # define vars
-        # ALLREQS: dict contains [type of item : [[sp requirements], [bonus sp]]
-        allreqs, itemset = ({} for i in range(2))
-        # noreqsp contains all bonus sp from no req pieces
-        # weapon sp dont count towards reqs
-        noreqsp, weaponsp, bestsp = (np.array([0, 0, 0, 0, 0]) for i in range(3))
-        # bestsp and bestreq holds... best sp and best reqs respectively
-        bestreq = None
-        # equiporder holds the final equip order
-        equiporder = []
-
-        # cycle thru and place equipment type/req, sp in a dict (allreqs)
+        # Map of slot : (req, sp_bonus)
+        equipments = dict()
+        # Map of slot : setname
+        itemset = dict()
+        # weapon (listed separately, a triple as well for consistency)
+        weapon = None
         for slot, item in self.equipments.items():
-            if item is not None:
-                itemreq = np.array([item['strReq'], item['dexReq'], item['intReq'], item['defReq'], item['agiReq']])
-                itemsp = np.array([item['str'], item['dex'], item['int'], item['def'], item['agi']])
-                netsp = np.array(
-                    [itemreq[0] - itemsp[0], itemreq[1] - itemsp[1], itemreq[2] - itemsp[2], itemreq[3] - itemsp[3],
-                     itemreq[4] - itemsp[4]])
-
-                if 'weapon' in slot:
-                    weaponsp = itemsp
-                    itemsp = np.array([0, 0, 0, 0, 0])
-                    self.currentclass = self.WEAPONTOCLASS[item['type']]
-                if 'set' in item:
-                    itemset[slot] = item['set']
-
-                    # print(itemset)
-                if sum(itemreq) == 0 and sum(itemsp) >= 0:
-                    for i in range(5):
-                        noreqsp[i] += itemsp[i]
-                    equiporder.append(slot)
-                    continue
-            else:
+            if item is None:
                 continue
-            allreqs[slot] = [itemreq, itemsp, netsp]
-            print(allreqs)
+            itemreq = np.array([item[sp+"Req"] for sp in self.SKILLPOINTS], dtype=np.float32)
+            itemsp = np.array([item[sp] for sp in self.SKILLPOINTS], dtype=np.float32)
+            _item = (itemreq, itemsp)
+            if 'weapon' in slot:
+                weapon = _item
+                self.currentclass = self.WEAPONTOCLASS[item['type']]
+            else:
+                equipments[slot] = _item
+            if 'set' in item:
+                itemset[slot] = item['set']
 
-        # print(f'All item for permute: {allreqs}')
-        # algorithm optimization
+        import copy
+        _setbonus = self.setbonus
+        _SKILLPOINTS = self.SKILLPOINTS
+        # A node in the graph search. We will search through the space of equip orders to find the best one.
+        class Node:
+            # remain parameter is empty if all gear is equipped but weapon not.
+            # If everything incl weapon is done, then it is None.
+            def __init__(self, assign_num, sp_floors, totals, order, remain, itemsetcount):
+                self.assign_num = assign_num
+                self.sp_floors = sp_floors
+                self.totals = totals
+                self.order = order
+                self.remain = remain
+                self.itemsetcount = itemsetcount
 
-        # sort by net sp
-        netsp_sort = np.sort(
-            np.array([sum(allreqs[itemtype][2]) for itemtype in allreqs.keys() if 'weapon' not in itemtype],
-                     dtype='object'))
-        if 'weapon' in allreqs:
-            netsp_sort = np.append(netsp_sort, sum(allreqs['weapon'][2]))
+            def neighbors(self):
+                if len(self.remain) == 0:
+                    # Last one is the weapon.
+                    # In case weapon is undefined, we will unset it here.
+                    if weapon is None:
+                        self.remain = None
+                        return [self]
+                    return [self.equipped(weapon)]
 
-        for itemtype, skp in allreqs.items():
-            for i in range(len(netsp_sort)):
-                if sum(skp[2]) == netsp_sort[i]:
-                    netsp_sort[i] = itemtype
+                return [self.equipped(x) for x in self.remain]
 
-        print(f'SORTED ORDER: {netsp_sort}')
+            # Return a copy of this node after equipping the given item.
+            def equipped(self, item_slot):
+                item = equipments[item_slot]
+                itemsetcount = copy.copy(self.itemsetcount)
+                # Element-wise maximum.
+                req_deltas = np.maximum(np.zeros(5), item[0] - self.totals)
+                assign_num = self.assign_num + req_deltas
+                set_delta = np.zeros(5)
+                if item_slot in itemset:
+                    setname = itemset[item_slot]
+                    set_current_count = itemsetcount[setname]
+                    new_bonuses = _setbonus[setname][set_current_count]
+                    if set_current_count == 0:
+                        for i, sp in enumerate(_SKILLPOINTS):
+                            set_delta[i] = new_bonuses.get(sp, 0)
+                    else:
+                        old_bonuses = _setbonus[setname][set_current_count - 1]
+                        # BIG ASSUMPTION: SKILLPOINTS array ordering is same as ordering used above!
+                        for i, sp in enumerate(_SKILLPOINTS):
+                            set_delta[i] = new_bonuses.get(sp, 0) - old_bonuses.get(sp, 0)
 
-        # permutation take 3
-        # create permute
-        buildpermute = np.array(list(permutations(netsp_sort)))
+                    itemsetcount[setname] += 1
+                totals = self.totals + req_deltas + item[1] + set_delta
+                neg_sp_deltas = np.maximum(np.zeros(5), self.sp_floors - self.totals)
+                assign_num += neg_sp_deltas
+                totals += neg_sp_deltas
+                new_floors = item[0] + item[1]
+                new_floors[item[0] == 0] = np.NINF # Negative infinity. If it has no req, don't update the sp floor.
+                sp_floors = np.maximum(self.sp_floors, new_floors)
 
-        for possibleorder in buildpermute:
-            # print('NEW ATTEMPT')
-            # refreshing vars each run
-            assigned = np.array([0, 0, 0, 0, 0])
+                if len(self.remain) == 0:
+                    remain = None
+                else:
+                    remain = copy.copy(self.remain)
+                    remain.remove(item_slot)
 
-            total, skillpoints = (np.copy(noreqsp) for i in range(2))
-            max_min_req = [0, 0, 0, 0, 0]
+                return Node(assign_num, sp_floors, totals, self.order + [item_slot], remain, itemsetcount)
+        
+        start_node = Node(np.zeros(5), np.array([np.NINF] * 5), np.zeros(5), [], set(equipments.keys()), {setname: 0 for setname in itemset.values()})
+        from heapq import heappush, heappop
+        pqueue = []
+        pqueue.append((0, 0, start_node))
+        solution = None
+        solution_score = np.Inf
+        node_age = 0
+        while pqueue:
+            score, age, head = heappop(pqueue)
+            if score > solution_score:
+                break
+            if head.remain is None:
+                if score < solution_score:
+                    solution = head
+                    solution_score = score
+            else:
+                for x in head.neighbors():
+                    node_age += 1
+                    heappush(pqueue, (sum(x.assign_num), node_age, x))
+        if solution is None:
+            print("Failed I guess..")
+            self.wearorder = []
+            for i in range(5):
+                self.assignedSP[self.SKILLPOINTS[i]] = 0
+                self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = 0
+        else:
+            self.wearorder = solution.order
+            for i in range(5):
+                self.assignedSP[self.SKILLPOINTS[i]] = solution.assign_num[i]
+                self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = solution.assign_num[i]
+                self.totalstats[self.SKILLPOINTS[i]] = solution.totals[i]
+        
+#         # define vars
+#         # ALLREQS: dict contains [type of item : [[sp requirements], [bonus sp]]
+#         allreqs, itemset = ({} for i in range(2))
+#         # noreqsp contains all bonus sp from no req pieces
+#         # weapon sp dont count towards reqs
+#         noreqsp, weaponsp, bestsp = (np.array([0, 0, 0, 0, 0]) for i in range(3))
+#         # bestsp and bestreq holds... best sp and best reqs respectively
+#         bestreq = None
+#         # equiporder holds the final equip order
+#         equiporder = []
+# 
+#         # cycle thru and place equipment type/req, sp in a dict (allreqs)
+#         for slot, item in self.equipments.items():
+#             if item is not None:
+#                 itemreq = np.array([item['strReq'], item['dexReq'], item['intReq'], item['defReq'], item['agiReq']])
+#                 itemsp = np.array([item['str'], item['dex'], item['int'], item['def'], item['agi']])
+#                 netsp = np.array(
+#                     [itemreq[0] - itemsp[0], itemreq[1] - itemsp[1], itemreq[2] - itemsp[2], itemreq[3] - itemsp[3],
+#                      itemreq[4] - itemsp[4]])
+# 
+#                 if 'weapon' in slot:
+#                     weaponsp = itemsp
+#                     itemsp = np.array([0, 0, 0, 0, 0])
+#                     self.currentclass = self.WEAPONTOCLASS[item['type']]
+#                 if 'set' in item:
+#                     itemset[slot] = item['set']
+# 
+#                     # print(itemset)
+#                 if sum(itemreq) == 0 and sum(itemsp) >= 0:
+#                     for i in range(5):
+#                         noreqsp[i] += itemsp[i]
+#                     equiporder.append(slot)
+#                     continue
+#             else:
+#                 continue
+#             allreqs[slot] = [itemreq, itemsp, netsp]
+#             print(allreqs)
+# 
+#         # print(f'All item for permute: {allreqs}')
+#         # algorithm optimization
+# 
+#         # sort by net sp
+#         netsp_sort = np.sort(
+#             np.array([sum(allreqs[itemtype][2]) for itemtype in allreqs.keys() if 'weapon' not in itemtype],
+#                      dtype='object'))
+#         if 'weapon' in allreqs:
+#             netsp_sort = np.append(netsp_sort, sum(allreqs['weapon'][2]))
+# 
+#         for itemtype, skp in allreqs.items():
+#             for i in range(len(netsp_sort)):
+#                 if sum(skp[2]) == netsp_sort[i]:
+#                     netsp_sort[i] = itemtype
+# 
+#         print(f'SORTED ORDER: {netsp_sort}')
+# 
+#         # permutation take 3
+#         # create permute
+#         buildpermute = np.array(list(permutations(netsp_sort)))
+# 
+#         for possibleorder in buildpermute:
+#             # print('NEW ATTEMPT')
+#             # refreshing vars each run
+#             assigned = np.array([0, 0, 0, 0, 0])
+# 
+#             total, skillpoints = (np.copy(noreqsp) for i in range(2))
+#             max_min_req = [0, 0, 0, 0, 0]
+# 
+#             itemsetcount, itemsetsp = ({} for i in range(2))
+# 
+#             equipattempt = []
+#             equipattempt.extend(equiporder)
+# 
+#             for itemtype in possibleorder:
+# 
+#                 if itemtype in itemset:
+#                     # print('this item is in a set')
+# 
+#                     if itemset[itemtype] not in itemsetcount:
+#                         # print('set currently not exist, creating')
+#                         itemsetcount[itemset[itemtype]] = 0
+#                         itemsetsp[itemset[itemtype]] = [0, 0, 0, 0, 0]
+# 
+#                     # MAKE THIS LOOK BETTER, somehow... (partially better)
+# 
+#                     for bonustype, bonusamount in self.setbonus[itemset[itemtype]][
+#                         itemsetcount[itemset[itemtype]]].items():
+#                         if bonustype in self.SKILLPOINTS:
+#                             skillpoints[self.SKILLPOINTS.index(bonustype)] -= \
+#                                 itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
+# 
+#                             itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] += \
+#                                 abs(itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] - bonusamount)
+# 
+#                             skillpoints[self.SKILLPOINTS.index(bonustype)] += \
+#                                 itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
+# 
+#                     itemsetcount[itemset[itemtype]] += 1
+# 
+#                     # print(f'SP FROM SET {itemsetsp}')
+# 
+#                 for i in range(5):
+# 
+#                     # if current total sp is lower than req
+#                     if total[i] < allreqs[itemtype][0][i]:
+#                         # blame self feeding scenario
+#                         if total[i] >= 0:
+#                             assigned[i] += abs(total[i] - allreqs[itemtype][0][i])
+#                         # blame negative sp scenario
+#                         else:
+#                             assigned[i] += abs(assigned[i] - allreqs[itemtype][0][i])
+#                         total[i] = assigned[i]
+# 
+#                     # set all bonus sp (incl pos and negs) into the var
+#                     skillpoints[i] += allreqs[itemtype][1][i]
+#                     # calculate total with assigned + bonus
+#                     total[i] = assigned[i] + skillpoints[i]
+# 
+#                     # get the minimum reqs required for wearing (max item req + item sp)
+#                     max_min_req[i] = max(max_min_req[i], allreqs[itemtype][0][i] + allreqs[itemtype][1][i])
+# 
+#                     # max_min_req = 0 meaning it does not count to reqs
+#                     # the other one is blame 0 sp assigned scenario
+#                     if max_min_req[i] == 0 or (assigned[i] == 0 and total[i] == 0):
+#                         pass
+#                     # compensate sp if the total is lower than the minimum needed to wear
+#                     elif total[i] < max_min_req[i]:
+#                         assigned[i] += abs(total[i] - max_min_req[i])
+#                         total[i] += abs(total[i] - max_min_req[i])
+#                         # print('----\nreassigning\n----\n')
+# 
+#                     
+#                 if bestreq is not None and sum(assigned) > sum(bestreq):
+#                     # print(f'\nABORTING\n')
+#                     break
+# 
+#                 # get best results
+#                 equipattempt.append(itemtype)
+# 
+#             if bestreq is None or sum(assigned) < sum(bestreq):
+#                 bestreq = assigned
+#                 bestsp = total
+#                 for i in range(5):
+#                     if 'weapon' in equipattempt:
+#                         bestsp[i] += weaponsp[i]
+#                     self.assignedSP[self.SKILLPOINTS[i]] = bestsp[0]
+#                 self.wearorder = equipattempt
+# 
+#         for i in range(5):
+#             self.totalstats[self.SKILLPOINTS[i]] = bestsp[i]
+#             self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = bestreq[i]
 
-            itemsetcount, itemsetsp = ({} for i in range(2))
-
-            equipattempt = []
-            equipattempt.extend(equiporder)
-
-            for itemtype in possibleorder:
-
-                if itemtype in itemset:
-                    # print('this item is in a set')
-
-                    if itemset[itemtype] not in itemsetcount:
-                        # print('set currently not exist, creating')
-                        itemsetcount[itemset[itemtype]] = 0
-                        itemsetsp[itemset[itemtype]] = [0, 0, 0, 0, 0]
-
-                    # MAKE THIS LOOK BETTER, somehow... (partially better)
-
-                    for bonustype, bonusamount in self.setbonus[itemset[itemtype]][
-                        itemsetcount[itemset[itemtype]]].items():
-                        if bonustype in self.SKILLPOINTS:
-                            skillpoints[self.SKILLPOINTS.index(bonustype)] -= \
-                                itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
-
-                            itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] += \
-                                abs(itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] - bonusamount)
-
-                            skillpoints[self.SKILLPOINTS.index(bonustype)] += \
-                                itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
-
-                    itemsetcount[itemset[itemtype]] += 1
-
-                    # print(f'SP FROM SET {itemsetsp}')
-
-                for i in range(5):
-
-                    # if current total sp is lower than req
-                    if total[i] < allreqs[itemtype][0][i]:
-                        # blame self feeding scenario
-                        if total[i] >= 0:
-                            assigned[i] += abs(total[i] - allreqs[itemtype][0][i])
-                        # blame negative sp scenario
-                        else:
-                            assigned[i] += abs(assigned[i] - allreqs[itemtype][0][i])
-                        total[i] = assigned[i]
-
-                    # set all bonus sp (incl pos and negs) into the var
-                    skillpoints[i] += allreqs[itemtype][1][i]
-                    # calculate total with assigned + bonus
-                    total[i] = assigned[i] + skillpoints[i]
-
-                    # get the minimum reqs required for wearing (max item req + item sp)
-                    max_min_req[i] = max(max_min_req[i], allreqs[itemtype][0][i] + allreqs[itemtype][1][i])
-
-                    # max_min_req = 0 meaning it does not count to reqs
-                    # the other one is blame 0 sp assigned scenario
-                    if max_min_req[i] == 0 or (assigned[i] == 0 and total[i] == 0):
-                        pass
-                    # compensate sp if the total is lower than the minimum needed to wear
-                    elif total[i] < max_min_req[i]:
-                        assigned[i] += abs(total[i] - max_min_req[i])
-                        total[i] += abs(total[i] - max_min_req[i])
-                        # print('----\nreassigning\n----\n')
-
-                    # add weapon sp to final
-
-                    # print(f'ASSIGNED: {assigned}')
-                    # print(f'TOTAL: {total}')
-                    # print(f'SKILLPOINTS: {skillpoints}')
-                    # print(f'MAX MIN REQ: {max_min_req}\n\n')
-
-                # if current assigned sp is larger than best, drop a run
-                # print(f'EQUIP ORDER: {equipattempt}')
-                if bestreq is not None and sum(assigned) > sum(bestreq):
-                    # print(f'\nABORTING\n')
-                    break
-
-                # get best results
-                equipattempt.append(itemtype)
-
-            if bestreq is None or sum(assigned) < sum(bestreq):
-                bestreq = assigned
-                bestsp = total
-                for i in range(5):
-                    if 'weapon' in equipattempt:
-                        bestsp[i] += weaponsp[i]
-                    self.assignedSP[self.SKILLPOINTS[i]] = bestsp[0]
-                self.wearorder = equipattempt
-
-        for i in range(5):
-            self.totalstats[self.SKILLPOINTS[i]] = bestsp[i]
-            self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = bestreq[i]
-
-        print(f'FINAL RESULT: \nBEST REQS: {bestreq}\nTOTAL SP: {bestsp}\nWEAR ORDER: {self.wearorder}')
+        # print(f'FINAL RESULT: \nBEST REQS: {bestreq}\nTOTAL SP: {bestsp}\nWEAR ORDER: {self.wearorder}')
 
         # print(self.setbonus)
 
