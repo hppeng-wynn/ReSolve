@@ -23,4 +23,5 @@ Just lags behind WynnBuilder (blame python), ReSolve takes pride on its incredib
 
 # Credits
 Wynnbuilder (by hppeng and ferricles): https://github.com/wynnbuilder/wynnbuilder.github.io
+
 ^ ^ awesome people and awesome work

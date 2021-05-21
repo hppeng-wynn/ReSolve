@@ -12,9 +12,9 @@ def clamp(num, min_value, max_value):
 def round_tonoteven(x, d=0):
     p = 10 ** d
     if x > 0:
-        return int(float(math.floor((x * p) - 0.5)) / p)
+        return int(float(math.floor((x * p) + 0.5)) / p)
     else:
-        return int(float(math.ceil((x * p) + 0.5)) / p)
+        return int(float(math.ceil((x * p) - 0.5)) / p)
 
 
 def neutralconversion(neutral_base, neutral, pct_convert):
@@ -414,11 +414,11 @@ class Builder:
                         elif k in self.SPELLCOSTSPCT:
                             self.rawstats[k] += round_tonoteven(item[k] * 1.3)
                         elif k in self.SPELLCOSTSRAW:
-                            self.rawstats[k] += round(item[k] * 1.3)
+                            self.rawstats[k] += round_tonoteven(item[k] * 1.3)
                         elif item[k] < 0:
-                            self.rawstats[k] += round(item[k] * 0.7)
+                            self.rawstats[k] += round_tonoteven(item[k] * 0.7)
                         else:
-                            self.rawstats[k] += round(item[k] * 1.3)
+                            self.rawstats[k] += round_tonoteven(item[k] * 1.3)
 
         for itemtype, powdering in powders.items():
             if 'weapon' in itemtype:
@@ -577,8 +577,6 @@ class Builder:
                         # print('----\nreassigning\n----\n')
 
                     # add weapon sp to final
-                    if itemtype == 'weapon':
-                        total[i] += weaponsp[i]
 
                     # print(f'ASSIGNED: {assigned}')
                     # print(f'TOTAL: {total}')
@@ -598,6 +596,8 @@ class Builder:
                 bestreq = assigned
                 bestsp = total
                 for i in range(5):
+                    if 'weapon' in itemtype:
+                        bestsp[i] += weaponsp[i]
                     self.assignedSP[self.SKILLPOINTS[i]] = bestsp[0]
                 self.wearorder = equipattempt
 
