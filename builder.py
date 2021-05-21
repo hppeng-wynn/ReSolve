@@ -479,7 +479,7 @@ class Builder:
                     itemset[slot] = item['set']
 
                     # print(itemset)
-                if sum(itemreq) == 0 and not sum(itemsp) < 0:
+                if sum(itemreq) == 0 and sum(itemsp) >= 0:
                     for i in range(5):
                         noreqsp[i] += itemsp[i]
                     equiporder.append(slot)
@@ -487,6 +487,7 @@ class Builder:
             else:
                 continue
             allreqs[slot] = [itemreq, itemsp, netsp]
+            print(allreqs)
 
         # print(f'All item for permute: {allreqs}')
         # algorithm optimization
@@ -503,6 +504,8 @@ class Builder:
                 if sum(skp[2]) == netsp_sort[i]:
                     netsp_sort[i] = itemtype
 
+        print(f'SORTED ORDER: {netsp_sort}')
+
         # permutation take 3
         # create permute
         buildpermute = np.array(list(permutations(netsp_sort)))
@@ -512,7 +515,8 @@ class Builder:
             # refreshing vars each run
             assigned = np.array([0, 0, 0, 0, 0])
 
-            total, skillpoints, max_min_req = (np.copy(noreqsp) for i in range(3))
+            total, skillpoints = (np.copy(noreqsp) for i in range(2))
+            max_min_req = [0, 0, 0, 0, 0]
 
             itemsetcount, itemsetsp = ({} for i in range(2))
 
@@ -520,6 +524,7 @@ class Builder:
             equipattempt.extend(equiporder)
 
             for itemtype in possibleorder:
+
                 if itemtype in itemset:
                     # print('this item is in a set')
 
@@ -596,7 +601,7 @@ class Builder:
                 bestreq = assigned
                 bestsp = total
                 for i in range(5):
-                    if 'weapon' in itemtype:
+                    if 'weapon' in equipattempt:
                         bestsp[i] += weaponsp[i]
                     self.assignedSP[self.SKILLPOINTS[i]] = bestsp[0]
                 self.wearorder = equipattempt
