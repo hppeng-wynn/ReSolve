@@ -371,6 +371,7 @@ class Builder:
             self.rawstats[k] = 0
 
         for keyword in query:
+            print(keyword)
             for item in self.db['items']:
                 if keyword == item['name']:
                     if 'ring' in item['type'] and not self.equipments['ring1']:
@@ -564,7 +565,7 @@ class Builder:
                 self.assignedSP[self.SKILLPOINTS[i]] = solution.assign_num[i]
                 self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = solution.assign_num[i]
                 self.totalstats[self.SKILLPOINTS[i]] = solution.totals[i]
-            # self.bonusSP = solution.totals
+            self.bonusSP = solution.totals
             print(f'ASSIGNED: {solution.assign_num}')
             print(f'TOTAL: {solution.totals}')
 
