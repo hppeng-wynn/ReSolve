@@ -1,5 +1,6 @@
 import json
 import math
+from itertools import permutations
 import numpy as np
 from collections import Counter
 
@@ -152,8 +153,6 @@ class Builder:
         self.sets, self.setbonus, self.totalstats = ({} for i in range(3))
 
         self.assignedSP = {'str': 0, 'dex': 0, 'int': 0, 'def': 0, 'agi': 0}
-
-        self.bonusSP = []
 
         self.currentclass = 'Mage'
 
@@ -359,7 +358,7 @@ class Builder:
         if query is None:
             query = []
 
-        setcount = []
+        setcount, uniqueset = ([] for i in range(2))
 
         self.sets, self.setbonus = ({} for i in range(2))
 
@@ -371,7 +370,6 @@ class Builder:
             self.rawstats[k] = 0
 
         for keyword in query:
-            print(keyword)
             for item in self.db['items']:
                 if keyword == item['name']:
                     if 'ring' in item['type'] and not self.equipments['ring1']:
@@ -386,8 +384,10 @@ class Builder:
                         setcount.append(item['set'])
 
         # Determining sets
-        if setcount:
-            self.sets.update(Counter(setcount))
+        uniqueset = [x for x in setcount if x not in uniqueset]
+        if uniqueset:
+            for i in uniqueset:
+                self.sets[i] = setcount.count(i)
             for setname, count in self.sets.items():
                 # print(setname)
                 # print(setdata[setname]['bonuses'][count - 1])
@@ -396,15 +396,16 @@ class Builder:
                     if k in self.setbonus[setname][count - 1]:
                         self.rawstats[k] = self.setbonus[setname][count - 1][k]
 
-        # print(f'ACTIVE SET {self.sets}')
-        # print(self.setbonus)
+        print(f'ACTIVE SET {self.sets}')
+        print(self.setbonus)
 
         # Calculating total stats w/ max rolls for each item
         for item in self.equipments.values():
             if item:
+                # parsing armor powders
                 print(item)
-                # print('item found, adding')
-                for k in self.rawstats.keys():
+                print('item found, adding')
+                for k, v in self.rawstats.items():
                     if k in item:
                         if k in self.WEAPONDAMAGE:
                             self.rawstats[k] = item[k]
@@ -419,7 +420,6 @@ class Builder:
                         else:
                             self.rawstats[k] += round_tonoteven(item[k] * 1.3)
 
-        # parsing armor powders
         for itemtype, powdering in powders.items():
             if 'weapon' in itemtype:
                 continue
@@ -430,11 +430,12 @@ class Builder:
                     netelemdefs[powdertype[0]] += self.POWDER_TABLE[powdertype]['defense_inc'] * count
                     netelemdefs[self.POWDER_TABLE[powdertype]['defense_dec'][0]] -= \
                         self.POWDER_TABLE[powdertype]['defense_dec'][1] * count
+
         for eledefs in self.ELEMENTALDEF:
             self.rawstats[eledefs] += netelemdefs[eledefs[0]]
 
-        # print(self.rawstats)
-        # actually making total stats using base hp, hpb, hpr% and eledef%
+        print(self.rawstats)
+        # actually making total stats using hpb, hpr% and eledef%
         self.totalstats = self.rawstats
         self.totalstats['totalhp'] = self.totalstats['hp'] + self.totalstats['hpBonus'] + level_tobasehp(level)
         self.totalstats['totalhprRaw'] = round(self.totalstats['hprRaw'] * ((self.totalstats['hprPct'] / 100) + 1))
@@ -455,6 +456,7 @@ class Builder:
         itemset = dict()
         # weapon (listed separately, a triple as well for consistency)
         weapon = None
+
         for slot, item in self.equipments.items():
             if item is None:
                 continue
@@ -462,12 +464,11 @@ class Builder:
             itemsp = np.array([item[sp] for sp in self.SKILLPOINTS], dtype=np.float32)
             _item = (itemreq, itemsp)
             if 'weapon' in slot:
-                weapon = _item
                 self.currentclass = self.WEAPONTOCLASS[item['type']]
-            else:
-                equipments[slot] = _item
+            equipments[slot] = _item
             if 'set' in item:
                 itemset[slot] = item['set']
+
 
         import copy
         _setbonus = self.setbonus
@@ -491,7 +492,7 @@ class Builder:
                     if weapon is None:
                         self.remain = None
                         return [self]
-                    return [self.equipped(weapon)]
+                    return [self.equipped('weapon')]
 
                 return [self.equipped(x) for x in self.remain]
 
@@ -534,7 +535,13 @@ class Builder:
 
                 return Node(assign_num, sp_floors, totals, self.order + [item_slot], remain, itemsetcount)
         
-        start_node = Node(np.zeros(5), np.array([np.NINF] * 5), np.zeros(5), [], set(equipments.keys()), {setname: 0 for setname in itemset.values()})
+        itemsetcount = {setname: 0 for setname in itemset.values()}
+        start_node = Node(np.zeros(5), np.array([np.NINF] * 5), np.zeros(5), [], set(equipments.keys()), itemsetcount)
+
+        for slot, item in equipments.items():
+            if np.all(item[0] == 0) and np.all(item[1] >= 0):
+                start_node = start_node.equipped(slot)
+            
         from heapq import heappush, heappop
         pqueue = []
         pqueue.append((0, 0, start_node))
@@ -565,9 +572,164 @@ class Builder:
                 self.assignedSP[self.SKILLPOINTS[i]] = solution.assign_num[i]
                 self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = solution.assign_num[i]
                 self.totalstats[self.SKILLPOINTS[i]] = solution.totals[i]
-            self.bonusSP = solution.totals
-            print(f'ASSIGNED: {solution.assign_num}')
-            print(f'TOTAL: {solution.totals}')
+
+        self.damagecalculation()
+        
+    def solveskillpoints2(self):
+        # define vars
+        # ALLREQS: dict contains [type of item : [[sp requirements], [bonus sp]]
+        allreqs, itemset = ({} for i in range(2))
+        # noreqsp contains all bonus sp from no req pieces
+        # weapon sp dont count towards reqs
+        noreqsp, weaponsp, bestsp = (np.array([0, 0, 0, 0, 0]) for i in range(3))
+        # bestsp and bestreq holds... best sp and best reqs respectively
+        bestreq = None
+        # equiporder holds the final equip order
+        equiporder = []
+
+        # cycle thru and place equipment type/req, sp in a dict (allreqs)
+        for slot, item in self.equipments.items():
+            if item is not None:
+                itemreq = np.array([item['strReq'], item['dexReq'], item['intReq'], item['defReq'], item['agiReq']])
+                itemsp = np.array([item['str'], item['dex'], item['int'], item['def'], item['agi']])
+                netsp = np.array(
+                    [itemreq[0] - itemsp[0], itemreq[1] - itemsp[1], itemreq[2] - itemsp[2], itemreq[3] - itemsp[3],
+                     itemreq[4] - itemsp[4]])
+
+                if 'weapon' in slot:
+                    weaponsp = itemsp
+                    itemsp = np.array([0, 0, 0, 0, 0])
+                    self.currentclass = self.WEAPONTOCLASS[item['type']]
+                if 'set' in item:
+                    itemset[slot] = item['set']
+
+                    # print(itemset)
+                if sum(itemreq) == 0 and sum(itemsp) >= 0:
+                    for i in range(5):
+                        noreqsp[i] += itemsp[i]
+                    equiporder.append(slot)
+                    continue
+            else:
+                continue
+            allreqs[slot] = [itemreq, itemsp, netsp]
+            print(allreqs)
+
+        # print(f'All item for permute: {allreqs}')
+        # algorithm optimization
+
+        # sort by net sp
+        netsp_sort = np.sort(
+            np.array([sum(allreqs[itemtype][2]) for itemtype in allreqs.keys() if 'weapon' not in itemtype],
+                     dtype='object'))
+        if 'weapon' in allreqs:
+            netsp_sort = np.append(netsp_sort, sum(allreqs['weapon'][2]))
+
+        for itemtype, skp in allreqs.items():
+            for i in range(len(netsp_sort)):
+                if sum(skp[2]) == netsp_sort[i]:
+                    netsp_sort[i] = itemtype
+
+        print(f'SORTED ORDER: {netsp_sort}')
+
+        # permutation take 3
+        # create permute
+        buildpermute = np.array(list(permutations(netsp_sort)))
+
+        for possibleorder in buildpermute:
+            # print('NEW ATTEMPT')
+            # refreshing vars each run
+            assigned = np.array([0, 0, 0, 0, 0])
+
+            total, skillpoints = (np.copy(noreqsp) for i in range(2))
+            max_min_req = [0, 0, 0, 0, 0]
+
+            itemsetcount, itemsetsp = ({} for i in range(2))
+
+            equipattempt = []
+            equipattempt.extend(equiporder)
+
+            for itemtype in possibleorder:
+
+                if itemtype in itemset:
+                    # print('this item is in a set')
+
+                    if itemset[itemtype] not in itemsetcount:
+                        # print('set currently not exist, creating')
+                        itemsetcount[itemset[itemtype]] = 0
+                        itemsetsp[itemset[itemtype]] = [0, 0, 0, 0, 0]
+
+                    # MAKE THIS LOOK BETTER, somehow... (partially better)
+
+                    for bonustype, bonusamount in self.setbonus[itemset[itemtype]][
+                        itemsetcount[itemset[itemtype]]].items():
+                        if bonustype in self.SKILLPOINTS:
+                            skillpoints[self.SKILLPOINTS.index(bonustype)] -= \
+                                itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
+
+                            itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] += \
+                                abs(itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] - bonusamount)
+
+                            skillpoints[self.SKILLPOINTS.index(bonustype)] += \
+                                itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
+
+                    itemsetcount[itemset[itemtype]] += 1
+
+                    # print(f'SP FROM SET {itemsetsp}')
+
+                for i in range(5):
+
+                    # if current total sp is lower than req
+                    if total[i] < allreqs[itemtype][0][i]:
+                        # blame self feeding scenario
+                        if total[i] >= 0:
+                            assigned[i] += abs(total[i] - allreqs[itemtype][0][i])
+                        # blame negative sp scenario
+                        else:
+                            assigned[i] += abs(assigned[i] - allreqs[itemtype][0][i])
+                        total[i] = assigned[i]
+
+                    # set all bonus sp (incl pos and negs) into the var
+                    skillpoints[i] += allreqs[itemtype][1][i]
+                    # calculate total with assigned + bonus
+                    total[i] = assigned[i] + skillpoints[i]
+
+                    # get the minimum reqs required for wearing (max item req + item sp)
+                    max_min_req[i] = max(max_min_req[i], allreqs[itemtype][0][i] + allreqs[itemtype][1][i])
+
+                    # max_min_req = 0 meaning it does not count to reqs
+                    # the other one is blame 0 sp assigned scenario
+                    if max_min_req[i] == 0 or (assigned[i] == 0 and total[i] == 0):
+                        pass
+                    # compensate sp if the total is lower than the minimum needed to wear
+                    elif total[i] < max_min_req[i]:
+                        assigned[i] += abs(total[i] - max_min_req[i])
+                        total[i] += abs(total[i] - max_min_req[i])
+                        # print('----\nreassigning\n----\n')
+
+                    
+                if bestreq is not None and sum(assigned) > sum(bestreq):
+                    # print(f'\nABORTING\n')
+                    break
+
+                # get best results
+                equipattempt.append(itemtype)
+
+            if bestreq is None or sum(assigned) < sum(bestreq):
+                bestreq = assigned
+                bestsp = total
+                for i in range(5):
+                    if 'weapon' in equipattempt:
+                        bestsp[i] += weaponsp[i]
+                    self.assignedSP[self.SKILLPOINTS[i]] = bestsp[0]
+                self.wearorder = equipattempt
+
+        for i in range(5):
+            self.totalstats[self.SKILLPOINTS[i]] = bestsp[i]
+            self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = bestreq[i]
+
+        # print(f'FINAL RESULT: \nBEST REQS: {bestreq}\nTOTAL SP: {bestsp}\nWEAR ORDER: {self.wearorder}')
+
+        # print(self.setbonus)
 
         self.damagecalculation()
 
@@ -591,3 +753,4 @@ class Builder:
 
 
 builder = Builder()
+builder.readitem(['Corsair', 'Golden Scarab', 'Demon Tide', 'Hephaestus-Forged Sabatons', 'Yang', 'Diamond Static Ring', 'Diamond Static Bracelet', 'Tenuto', 'Cataclysm'])
