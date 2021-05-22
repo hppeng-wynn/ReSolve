@@ -562,7 +562,6 @@ class Builder:
                 self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = 0
         else:
             self.wearorder = solution.order
-            print(solution.sp_floors)
             for i in range(5):
                 self.assignedSP[self.SKILLPOINTS[i]] = solution.assign_num[i]
                 self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = solution.assign_num[i]
