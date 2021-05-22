@@ -25,3 +25,5 @@ Just lags behind WynnBuilder (blame python), ReSolve takes pride on its incredib
 Wynnbuilder (by hppeng and ferricles): https://github.com/wynnbuilder/wynnbuilder.github.io
 
 ^ ^ awesome people and awesome work
+
+hppeng(ingeer): implementation of a very efficient algo for skillpoints and help.
