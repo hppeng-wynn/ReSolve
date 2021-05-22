@@ -26,4 +26,4 @@ Wynnbuilder (by hppeng and ferricles): https://github.com/wynnbuilder/wynnbuilde
 
 ^ ^ awesome people and awesome work
 
-hppeng(ingeer): implementation of a very efficient algo for skillpoints and help.
+hppeng(ineer): implementation of a very efficient algo for skillpoints and help.
