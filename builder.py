@@ -404,7 +404,7 @@ class Builder:
         for item in self.equipments.values():
             if item:
                 # parsing armor powders
-                print(item)
+                #print(item)
                 print('item found, adding')
                 for k, v in self.rawstats.items():
                     if k in item:
@@ -435,7 +435,7 @@ class Builder:
         for eledefs in self.ELEMENTALDEF:
             self.rawstats[eledefs] += netelemdefs[eledefs[0]]
 
-        print(self.rawstats)
+        #print(self.rawstats)
         # actually making total stats using hpb, hpr% and eledef%
         self.totalstats = self.rawstats
         self.totalstats['totalhp'] = self.totalstats['hp'] + self.totalstats['hpBonus'] + level_tobasehp(level)
@@ -447,7 +447,14 @@ class Builder:
         self.totalstats['totaleDef'] = round(self.totalstats['eDef'] * ((self.totalstats['eDefPct'] / 100) + 1))
         self.totalstats['activeSet'] = self.sets
 
+        import time
+        t0 = time.time()
         self.solveskillpoints()
+        t1 = time.time()
+        #self.solveskillpoints2()
+        #t2 = time.time()
+        print(f"Search: {t1 - t0}")
+        #print(f"Old: {t2 - t1}")
 
     def solveskillpoints(self):
         # Skillpoints Calculation
@@ -458,18 +465,24 @@ class Builder:
         # weapon (listed separately, a triple as well for consistency)
         weapon = None
 
+        net_req = np.zeros(5)
+        total_boosts = np.zeros(5)
         for slot, item in self.equipments.items():
             if item is None:
                 continue
             itemreq = np.array([item[sp+"Req"] for sp in self.SKILLPOINTS], dtype=np.float32)
             itemsp = np.array([item[sp] for sp in self.SKILLPOINTS], dtype=np.float32)
+            net_req = np.maximum(net_req, itemreq)
             _item = (itemreq, itemsp)
             if 'weapon' in slot:
                 self.currentclass = self.WEAPONTOCLASS[item['type']]
+            else:
+                total_boosts += itemsp
             equipments[slot] = _item
             if 'set' in item:
                 itemset[slot] = item['set']
 
+        min_assign = np.maximum(net_req - total_boosts, np.zeros(5))
 
         import copy
         _setbonus = self.setbonus
@@ -560,7 +573,9 @@ class Builder:
             else:
                 for x in head.neighbors():
                     node_age += 1
-                    heappush(pqueue, (sum(x.assign_num), node_age, x))
+                    # Distance + heuristic
+                    score = sum(x.assign_num) + sum(np.maximum(np.zeros(5), min_assign - x.assign_num))
+                    heappush(pqueue, (score, node_age, x))
         if solution is None:
             print("Failed I guess..")
             self.wearorder = []
