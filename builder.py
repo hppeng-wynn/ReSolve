@@ -502,6 +502,7 @@ class Builder:
                 itemsetcount = copy.copy(self.itemsetcount)
                 # Element-wise maximum.
                 req_deltas = np.maximum(np.zeros(5), item[0] - self.totals)
+                req_deltas[item[0] == 0] = 0    # If no req and negative, this is fine.
                 assign_num = self.assign_num + req_deltas
                 set_delta = np.zeros(5)
                 if item_slot in itemset:
@@ -519,7 +520,7 @@ class Builder:
 
                     itemsetcount[setname] += 1
                 totals = self.totals + req_deltas + item[1] + set_delta
-                neg_sp_deltas = np.maximum(np.zeros(5), self.sp_floors - self.totals)
+                neg_sp_deltas = np.maximum(np.zeros(5), self.sp_floors - totals)
                 assign_num += neg_sp_deltas
                 totals += neg_sp_deltas
                 new_floors = item[0] + item[1]
