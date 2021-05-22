@@ -158,6 +158,8 @@ class Builder:
 
         self.wearorder = []
 
+        self.bonusSP = []
+
         # ---------------------- dmg calc relateds ------------------------------
 
         self.SPELL_TABLE = {
@@ -386,8 +388,7 @@ class Builder:
         # Determining sets
         uniqueset = [x for x in setcount if x not in uniqueset]
         if uniqueset:
-            for i in uniqueset:
-                self.sets[i] = setcount.count(i)
+            self.sets = Counter(setcount)
             for setname, count in self.sets.items():
                 # print(setname)
                 # print(setdata[setname]['bonuses'][count - 1])
@@ -572,6 +573,7 @@ class Builder:
                 self.assignedSP[self.SKILLPOINTS[i]] = solution.assign_num[i]
                 self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = solution.assign_num[i]
                 self.totalstats[self.SKILLPOINTS[i]] = solution.totals[i]
+            self.bonusSP = solution.totals
 
         self.damagecalculation()
         
@@ -753,4 +755,3 @@ class Builder:
 
 
 builder = Builder()
-builder.readitem(['Corsair', 'Golden Scarab', 'Demon Tide', 'Hephaestus-Forged Sabatons', 'Yang', 'Diamond Static Ring', 'Diamond Static Bracelet', 'Tenuto', 'Cataclysm'])
