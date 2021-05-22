@@ -1,10 +1,12 @@
 from builder import builder
+from itemname_toid import createnew as c
+import json
 import sys
 from PyQt5 import QtWidgets, uic
 
 # TODO:
 # 1. Make stats config overview (Partially done, missing the effective x stuff)
-# 2. PERMUTATION: solve least sp to use a build (holy shit finally done?? yep its done)
+# 2. PERMUTATION: solve least sp to use a build (thank you hppeng ;w;)
 # 3. Damage Calculation !! LAST BECAUSE DEPENDANT !! (in progress)
 # 4. Actually verify that everything is correct lol
 # 5. Ask for testers
@@ -91,11 +93,11 @@ class Application(QtWidgets.QMainWindow):
         self.window.spin_total_adef.setValue(builder.totalstats['totalaDef'])
 
         # SP
-        self.window.spin_sp_str.setValue(builder.totalstats['str'])
-        self.window.spin_sp_dex.setValue(builder.totalstats['dex'])
-        self.window.spin_sp_int.setValue(builder.totalstats['int'])
-        self.window.spin_sp_def.setValue(builder.totalstats['def'])
-        self.window.spin_sp_agi.setValue(builder.totalstats['agi'])
+        self.window.spin_sp_str.setValue(int(builder.totalstats['str']))
+        self.window.spin_sp_dex.setValue(int(builder.totalstats['dex']))
+        self.window.spin_sp_int.setValue(int(builder.totalstats['int']))
+        self.window.spin_sp_def.setValue(int(builder.totalstats['def']))
+        self.window.spin_sp_agi.setValue(int(builder.totalstats['agi']))
 
         # ElemDmg%
         self.window.spin_elemdmg_earth.setValue(builder.totalstats['eDamPct'])
@@ -161,15 +163,28 @@ class Application(QtWidgets.QMainWindow):
             order += f'{builder.wearorder[i]}\n'
         self.window.label_equiporder.setText(order)
 
-        # skill points assignment
+        # class assignment
         self.window.cbox_class.setCurrentIndex(self.CLASSTOCBOXINDEX[builder.currentclass])
 
-        self.window.spin_req_str.setValue(builder.totalstats['strassign'])
-        self.window.spin_req_dex.setValue(builder.totalstats['dexassign'])
-        self.window.spin_req_int.setValue(builder.totalstats['intassign'])
-        self.window.spin_req_def.setValue(builder.totalstats['defassign'])
-        self.window.spin_req_agi.setValue(builder.totalstats['agiassign'])
+        # skill points assignment
+        self.window.spin_req_str.setValue(int(builder.totalstats['strassign']))
+        self.window.spin_req_dex.setValue(int(builder.totalstats['dexassign']))
+        self.window.spin_req_int.setValue(int(builder.totalstats['intassign']))
+        self.window.spin_req_def.setValue(int(builder.totalstats['defassign']))
+        self.window.spin_req_agi.setValue(int(builder.totalstats['agiassign']))
 
+
+# checks, tests, whatever
+
+# checking integrity (and update) of itemname_toid
+f = open('itemname_toid.json')
+name_toid = json.load(f)
+f.close()
+if len(name_toid) != len(builder.db['items']):
+    print('-----------\nre-updating itemname_toid.json\n-----------')
+    c()
+else:
+    print('itemname_toid.json is up to date with current database!')
 
 app = QtWidgets.QApplication(sys.argv)
 GUI = Application()
