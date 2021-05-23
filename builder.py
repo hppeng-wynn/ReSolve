@@ -52,6 +52,21 @@ def powderparse(powders):
         return parsedpowders
 
 
+def weapondmg_parse(weapon):
+    # weaponbasedamage = {min: {type: amount}, max: {type: amount}}
+    if not weapon:
+        return None
+    weaponbasedamage = {
+        'min': {'nDam': 0, 'eDam': 0, 'tDam': 0, 'wDam': 0, 'fDam': 0, 'aDam': 0},
+        'max': {'nDam': 0, 'eDam': 0, 'tDam': 0, 'wDam': 0, 'fDam': 0, 'aDam': 0}
+    }
+    for k, v in weapon.items():
+        if k in {'nDam', 'eDam', 'tDam', 'wDam', 'fDam', 'aDam'}:
+            weaponbasedamage['min'][k] = int(v[0:v.index('-')])
+            weaponbasedamage['max'][k] = int(v[v.index('-') + 1:])
+    return weaponbasedamage
+
+
 class Builder:
     def __init__(self):
         readfile = open('compress.json')
@@ -60,7 +75,7 @@ class Builder:
 
         self.UNROLLABLES = {'hp', 'eDef', 'tDef', 'wDef', 'fDef', 'aDef', 'str', 'dex', 'int', 'def', 'agi'}
 
-        self.WEAPONDAMAGE = {'nDam', 'eDam', 'tDam', 'wDam', 'fDam', 'aDam'}
+        self.WEAPONDAMAGE = ['nDam', 'eDam', 'tDam', 'wDam', 'fDam', 'aDam', 'atkSpd']
 
         self.ELEMENTALDEF = {'eDef', 'tDef', 'wDef', 'fDef', 'aDef'}
 
@@ -75,11 +90,19 @@ class Builder:
 
         self.SKILLPOINTS = ['str', 'dex', 'int', 'def', 'agi']
 
-        self.ELEMTOSTAT = {'e': ['eDef', 'eDam'],
-                           't': ['tDef', 'tDam'],
-                           'w': ['wDef', 'wDam'],
-                           'f': ['fDef', 'fDam'],
-                           'a': ['aDef', 'aDam']}
+        self.ELEMTOSTAT = {'e': ['eDef', 'eDam', 'str'],
+                           't': ['tDef', 'tDam', 'dex'],
+                           'w': ['wDef', 'wDam', 'int'],
+                           'f': ['fDef', 'fDam', 'def'],
+                           'a': ['aDef', 'aDam', 'agi']}
+
+        self.ATKSPDTOMULT = {'SUPER_SLOW': 0.51,
+                             'VERY_SLOW': 0.83,
+                             'SLOW': 1.5,
+                             'NORMAL': 2.05,
+                             'FAST': 2.5,
+                             'VERY_FAST': 3.1,
+                             'SUPER_FAST': 4.3}
 
         self.equipments = {'helmet': None,
                            'chestplate': None,
@@ -92,6 +115,7 @@ class Builder:
                            'weapon': None}
 
         self.rawstats = {'hp': 0,
+                         'atkSpd': '',
                          'nDam': '',
                          'eDam': '',
                          'tDam': '',
@@ -159,6 +183,8 @@ class Builder:
         self.wearorder = []
 
         self.bonusSP = []
+
+        self.weaponpowders = []
 
         # ---------------------- dmg calc relateds ------------------------------
 
@@ -421,9 +447,10 @@ class Builder:
                         else:
                             self.rawstats[k] += round_tonoteven(item[k] * 1.3)
 
+        # powder parse, in armor case, apply directly
         for itemtype, powdering in powders.items():
             if 'weapon' in itemtype:
-                continue
+                self.weaponpowders = powderparse(powdering)
             else:
                 parsedpowders = powderparse(powdering)
                 powdercount = dict(Counter(parsedpowders))
@@ -470,7 +497,7 @@ class Builder:
         for slot, item in self.equipments.items():
             if item is None:
                 continue
-            itemreq = np.array([item[sp+"Req"] for sp in self.SKILLPOINTS], dtype=np.float32)
+            itemreq = np.array([item[sp + "Req"] for sp in self.SKILLPOINTS], dtype=np.float32)
             itemsp = np.array([item[sp] for sp in self.SKILLPOINTS], dtype=np.float32)
             net_req = np.maximum(net_req, itemreq)
             _item = (itemreq, itemsp)
@@ -482,11 +509,10 @@ class Builder:
             if 'set' in item:
                 itemset[slot] = item['set']
 
-        min_assign = np.maximum(net_req - total_boosts, np.zeros(5))
-
         import copy
         _setbonus = self.setbonus
         _SKILLPOINTS = self.SKILLPOINTS
+
         # A node in the graph search. We will search through the space of equip orders to find the best one.
         class Node:
             # remain parameter is empty if all gear is equipped but weapon not.
@@ -516,7 +542,7 @@ class Builder:
                 itemsetcount = copy.copy(self.itemsetcount)
                 # Element-wise maximum.
                 req_deltas = np.maximum(np.zeros(5), item[0] - self.totals)
-                req_deltas[item[0] == 0] = 0    # If no req and negative, this is fine.
+                req_deltas[item[0] == 0] = 0  # If no req and negative, this is fine.
                 assign_num = self.assign_num + req_deltas
                 set_delta = np.zeros(5)
                 if item_slot in itemset:
@@ -538,7 +564,7 @@ class Builder:
                 assign_num += neg_sp_deltas
                 totals += neg_sp_deltas
                 new_floors = item[0] + item[1]
-                new_floors[item[0] == 0] = np.NINF # Negative infinity. If it has no req, don't update the sp floor.
+                new_floors[item[0] == 0] = np.NINF  # Negative infinity. If it has no req, don't update the sp floor.
                 sp_floors = np.maximum(self.sp_floors, new_floors)
 
                 if len(self.remain) == 0:
@@ -548,14 +574,14 @@ class Builder:
                     remain.remove(item_slot)
 
                 return Node(assign_num, sp_floors, totals, self.order + [item_slot], remain, itemsetcount)
-        
+
         itemsetcount = {setname: 0 for setname in itemset.values()}
         start_node = Node(np.zeros(5), np.array([np.NINF] * 5), np.zeros(5), [], set(equipments.keys()), itemsetcount)
 
         for slot, item in equipments.items():
             if np.all(item[0] == 0) and np.all(item[1] >= 0):
                 start_node = start_node.equipped(slot)
-            
+
         from heapq import heappush, heappop
         pqueue = []
         pqueue.append((0, 0, start_node))
@@ -590,183 +616,96 @@ class Builder:
                 self.totalstats[self.SKILLPOINTS[i]] = solution.totals[i]
             self.bonusSP = solution.totals
 
-        self.damagecalculation()
-        
-    def solveskillpoints2(self):
-        # define vars
-        # ALLREQS: dict contains [type of item : [[sp requirements], [bonus sp]]
-        allreqs, itemset = ({} for i in range(2))
-        # noreqsp contains all bonus sp from no req pieces
-        # weapon sp dont count towards reqs
-        noreqsp, weaponsp, bestsp = (np.array([0, 0, 0, 0, 0]) for i in range(3))
-        # bestsp and bestreq holds... best sp and best reqs respectively
-        bestreq = None
-        # equiporder holds the final equip order
-        equiporder = []
+        self.damagecalculation(self.equipments['weapon'], self.SPELL_TABLE['wand'][2]['parts'][0])
 
-        # cycle thru and place equipment type/req, sp in a dict (allreqs)
-        for slot, item in self.equipments.items():
-            if item is not None:
-                itemreq = np.array([item['strReq'], item['dexReq'], item['intReq'], item['defReq'], item['agiReq']])
-                itemsp = np.array([item['str'], item['dex'], item['int'], item['def'], item['agi']])
-                netsp = np.array(
-                    [itemreq[0] - itemsp[0], itemreq[1] - itemsp[1], itemreq[2] - itemsp[2], itemreq[3] - itemsp[3],
-                     itemreq[4] - itemsp[4]])
+    def damagecalculation(self, weapon=None, spellpart={}, stats=None):
+        # accept 1 spell part and return the final damage. no more. i can't process dict{dict{dict{dict}}}
+        # sample spell part layout: {'subtitle': 'First Damage', 'type': 'damage', 'multiplier': 130,
+        #                      'conversion': [60, 40, 0, 0, 0, 0]}
+        if stats is None:
+            stats = self.rawstats
+        weaponbase = weapondmg_parse(weapon)
+        spell_data = {}
+        final_damage = {'min_nocrit': {},
+                        'min_crit': {},
+                        'max_nocrit': {},
+                        'max_crit': {}}
+        # print(spellpart)
 
-                if 'weapon' in slot:
-                    weaponsp = itemsp
-                    itemsp = np.array([0, 0, 0, 0, 0])
-                    self.currentclass = self.WEAPONTOCLASS[item['type']]
-                if 'set' in item:
-                    itemset[slot] = item['set']
-
-                    # print(itemset)
-                if sum(itemreq) == 0 and sum(itemsp) >= 0:
-                    for i in range(5):
-                        noreqsp[i] += itemsp[i]
-                    equiporder.append(slot)
-                    continue
-            else:
-                continue
-            allreqs[slot] = [itemreq, itemsp, netsp]
-            print(allreqs)
-
-        # print(f'All item for permute: {allreqs}')
-        # algorithm optimization
-
-        # sort by net sp
-        netsp_sort = np.sort(
-            np.array([sum(allreqs[itemtype][2]) for itemtype in allreqs.keys() if 'weapon' not in itemtype],
-                     dtype='object'))
-        if 'weapon' in allreqs:
-            netsp_sort = np.append(netsp_sort, sum(allreqs['weapon'][2]))
-
-        for itemtype, skp in allreqs.items():
-            for i in range(len(netsp_sort)):
-                if sum(skp[2]) == netsp_sort[i]:
-                    netsp_sort[i] = itemtype
-
-        print(f'SORTED ORDER: {netsp_sort}')
-
-        # permutation take 3
-        # create permute
-        buildpermute = np.array(list(permutations(netsp_sort)))
-
-        for possibleorder in buildpermute:
-            # print('NEW ATTEMPT')
-            # refreshing vars each run
-            assigned = np.array([0, 0, 0, 0, 0])
-
-            total, skillpoints = (np.copy(noreqsp) for i in range(2))
-            max_min_req = [0, 0, 0, 0, 0]
-
-            itemsetcount, itemsetsp = ({} for i in range(2))
-
-            equipattempt = []
-            equipattempt.extend(equiporder)
-
-            for itemtype in possibleorder:
-
-                if itemtype in itemset:
-                    # print('this item is in a set')
-
-                    if itemset[itemtype] not in itemsetcount:
-                        # print('set currently not exist, creating')
-                        itemsetcount[itemset[itemtype]] = 0
-                        itemsetsp[itemset[itemtype]] = [0, 0, 0, 0, 0]
-
-                    # MAKE THIS LOOK BETTER, somehow... (partially better)
-
-                    for bonustype, bonusamount in self.setbonus[itemset[itemtype]][
-                        itemsetcount[itemset[itemtype]]].items():
-                        if bonustype in self.SKILLPOINTS:
-                            skillpoints[self.SKILLPOINTS.index(bonustype)] -= \
-                                itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
-
-                            itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] += \
-                                abs(itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)] - bonusamount)
-
-                            skillpoints[self.SKILLPOINTS.index(bonustype)] += \
-                                itemsetsp[itemset[itemtype]][self.SKILLPOINTS.index(bonustype)]
-
-                    itemsetcount[itemset[itemtype]] += 1
-
-                    # print(f'SP FROM SET {itemsetsp}')
-
-                for i in range(5):
-
-                    # if current total sp is lower than req
-                    if total[i] < allreqs[itemtype][0][i]:
-                        # blame self feeding scenario
-                        if total[i] >= 0:
-                            assigned[i] += abs(total[i] - allreqs[itemtype][0][i])
-                        # blame negative sp scenario
-                        else:
-                            assigned[i] += abs(assigned[i] - allreqs[itemtype][0][i])
-                        total[i] = assigned[i]
-
-                    # set all bonus sp (incl pos and negs) into the var
-                    skillpoints[i] += allreqs[itemtype][1][i]
-                    # calculate total with assigned + bonus
-                    total[i] = assigned[i] + skillpoints[i]
-
-                    # get the minimum reqs required for wearing (max item req + item sp)
-                    max_min_req[i] = max(max_min_req[i], allreqs[itemtype][0][i] + allreqs[itemtype][1][i])
-
-                    # max_min_req = 0 meaning it does not count to reqs
-                    # the other one is blame 0 sp assigned scenario
-                    if max_min_req[i] == 0 or (assigned[i] == 0 and total[i] == 0):
-                        pass
-                    # compensate sp if the total is lower than the minimum needed to wear
-                    elif total[i] < max_min_req[i]:
-                        assigned[i] += abs(total[i] - max_min_req[i])
-                        total[i] += abs(total[i] - max_min_req[i])
-                        # print('----\nreassigning\n----\n')
-
-                    
-                if bestreq is not None and sum(assigned) > sum(bestreq):
-                    # print(f'\nABORTING\n')
-                    break
-
-                # get best results
-                equipattempt.append(itemtype)
-
-            if bestreq is None or sum(assigned) < sum(bestreq):
-                bestreq = assigned
-                bestsp = total
-                for i in range(5):
-                    if 'weapon' in equipattempt:
-                        bestsp[i] += weaponsp[i]
-                    self.assignedSP[self.SKILLPOINTS[i]] = bestsp[0]
-                self.wearorder = equipattempt
-
-        for i in range(5):
-            self.totalstats[self.SKILLPOINTS[i]] = bestsp[i]
-            self.totalstats[f'{self.SKILLPOINTS[i]}assign'] = bestreq[i]
-
-        # print(f'FINAL RESULT: \nBEST REQS: {bestreq}\nTOTAL SP: {bestsp}\nWEAR ORDER: {self.wearorder}')
-
-        # print(self.setbonus)
-
-        self.damagecalculation()
-
-    def damagecalculation(self):
-        if self.equipments['weapon']:
-            # weaponbasedamage = {min: {type: amount}, max: {type: amount}}
-            weaponbasedamage = {
-                'min': {'nDam': 0, 'eDam': 0, 'tDam': 0, 'wDam': 0, 'fDam': 0, 'aDam': 0},
-                'max': {'nDam': 0, 'eDam': 0, 'tDam': 0, 'wDam': 0, 'fDam': 0, 'aDam': 0}
-            }
-
-            for k, v in self.equipments['weapon'].items():
-                if k in self.WEAPONDAMAGE:
-                    weaponbasedamage['min'][k] = int(v[0:v.index('-')])
-                    weaponbasedamage['max'][k] = int(v[v.index('-') + 1:])
-
-            print(f'WEAPON BASE: {weaponbasedamage}')
-
+        if 'heal' in spellpart['type']:
+            pass
         else:
-            return None
+            spell_data['min_conversion'] = weapondmg_parse(weapon)['min']
+            spell_data['max_conversion'] = weapondmg_parse(weapon)['max']
+        # print(spell_data)
+
+        # Step 1. Spell conversion
+        currentneutral_pct = 0
+        for conversions in spell_data.keys():
+            for element in spell_data[conversions].keys():
+                if 'nDam' in element:
+                    continue
+                elemental, new_neutral = \
+                    neutralconversion(weaponbase[conversions[:3]]['nDam'], spell_data[conversions]['nDam'],
+                                      spellpart['conversion'][self.WEAPONDAMAGE.index(element)] / 100)
+
+                spell_data[conversions][element] += elemental
+                spell_data[conversions]['nDam'] = new_neutral
+
+        print(f'METEOR CONVERTED: {spell_data}')
+
+        # Step 2. Powder application
+        print(self.weaponpowders)
+        for powder in self.weaponpowders:
+            for conversions in spell_data.keys():
+                elemental, new_neutral = \
+                    neutralconversion(weaponbase[conversions[:3]]['nDam'], spell_data[conversions]['nDam'],
+                                      self.POWDER_TABLE[powder]['convert'] / 100)
+
+                print(elemental + self.POWDER_TABLE[powder][f'damage_{conversions[:3]}'])
+                spell_data[conversions][self.ELEMTOSTAT[powder[0]][1]] += \
+                    elemental + self.POWDER_TABLE[powder][f'damage_{conversions[:3]}']
+                spell_data[conversions]['nDam'] = new_neutral
+
+        print(f'METEOR POWDERED: {spell_data}')
+
+        # Step 3 ID BONUSES
+        for conversions in spell_data.keys():
+            for element in spell_data[conversions].keys():
+                # final damage (min_(no)crit, max_(no)crit =
+                # base after conversion + powder *= ((sdpct + elem%) / 100) + str SP + own sp + (+1 dex with crit) + 1
+                if 'nDam' in element:
+                    final_damage[f'{conversions[:3]}_nocrit'][element] = spell_data[conversions][element] * (
+                            stats['sdPct'] / 100 + skillpoints_topercentage(stats['str']) + 1)
+                    final_damage[f'{conversions[:3]}_crit'][element] = spell_data[conversions][element] * (
+                            stats['sdPct'] / 100 + skillpoints_topercentage(stats['str']) + 1 + 1)
+                    # step 4 atkspd mult
+                    final_damage[f'{conversions[:3]}_nocrit'][element] *= self.ATKSPDTOMULT[stats['atkSpd']]
+                    final_damage[f'{conversions[:3]}_crit'][element] *= self.ATKSPDTOMULT[stats['atkSpd']]
+                    # step 5: THE RAW
+                    final_damage[f'{conversions[:3]}_crit'][element] += stats['sdRaw']
+                    final_damage[f'{conversions[:3]}_nocrit'][element] += stats['sdRaw']
+                    # step 6 spell mult
+                    final_damage[f'{conversions[:3]}_nocrit'][element] *= spellpart['multiplier'] / 100
+                    final_damage[f'{conversions[:3]}_crit'][element] *= spellpart['multiplier'] / 100
+                else:
+                    final_damage[f'{conversions[:3]}_nocrit'][element] = \
+                        spell_data[conversions][element] * ((stats['sdPct'] + stats[
+                            f'{self.ELEMTOSTAT[element[0]][1]}Pct']) / 100 + skillpoints_topercentage(
+                            stats[self.ELEMTOSTAT[element[0]][2]]) + skillpoints_topercentage(stats['str']) + 1)
+                    final_damage[f'{conversions[:3]}_crit'][element] = \
+                        spell_data[conversions][element] * ((stats['sdPct'] + stats[
+                            f'{self.ELEMTOSTAT[element[0]][1]}Pct']) / 100 + skillpoints_topercentage(
+                            stats[self.ELEMTOSTAT[element[0]][2]]) + skillpoints_topercentage(stats['str']) + 1 + 1)
+                    # step 4 atkspd mult
+                    final_damage[f'{conversions[:3]}_nocrit'][element] *= self.ATKSPDTOMULT[stats['atkSpd']]
+                    final_damage[f'{conversions[:3]}_crit'][element] *= self.ATKSPDTOMULT[stats['atkSpd']]
+                    # step 5 the raws is ^^ neutral
+                    # step 6 SPELL MULTIPLIER
+                    final_damage[f'{conversions[:3]}_nocrit'][element] *= spellpart['multiplier'] / 100
+                    final_damage[f'{conversions[:3]}_crit'][element] *= spellpart['multiplier'] / 100
+
+        # print(f'FINAL DAMAGE: {final_damage}')
 
 
 builder = Builder()

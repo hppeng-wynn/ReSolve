@@ -11,7 +11,7 @@ def createnew():
         os.remove('itemname_toid.json')
 
     id_mapping = open('itemname_toid.json', 'w', encoding="utf-8")
-    id_mapping.write('{\n')
+    id_mapping.write('{')
     for i in range(len(db['items'])):
         print(f'writing: {db["items"][i]["name"]}')
 
@@ -20,6 +20,6 @@ def createnew():
         else:
             id_mapping.write(f'"{db["items"][i]["name"]}": {db["items"][i]["id"]}')
         if i != len(db['items']) - 1:
-            id_mapping.write(',\n')
-    id_mapping.write('\n}')
+            id_mapping.write(', ')
+    id_mapping.write('}')
     id_mapping.close()

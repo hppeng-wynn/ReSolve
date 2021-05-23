@@ -1,5 +1,16 @@
 from builder import builder
+from builder2 import builder as builder2
 import time
+
+start = time.time()
+builder.readitem(['Cancer֎', 'Boreal-Patterned Aegis', 'Cinderchain', 'Curador Boots', 'Yang', 'Diamond Hydro Ring', 'Diamond Hydro Bracelet', 'Tenuto', 'Black'])
+end = time.time()
+print(f'---------\n\nLoad time of cryoseism with hpp algo: {(end - start)}')
+
+start = time.time()
+builder2.readitem(['Cancer֎', 'Boreal-Patterned Aegis', 'Cinderchain', 'Curador Boots', 'Yang', 'Diamond Hydro Ring', 'Diamond Hydro Bracelet', 'Tenuto', 'Black'])
+end = time.time()
+print(f'---------\n\nLoad time of cryoseism with old algo: {(end - start)}')
 
 builder.readitem(['Cumulonimbus'])
 
@@ -43,4 +54,15 @@ builder.readitem(['Albacore', 'Insulated Plate Mail', 'Demon Tide', 'Paradox', '
 builder.readitem(['Cumulonimbus', 'Medeis', 'Adrenaline', 'Paradox', 'Yang', 'Yang', 'Diamond Hydro Bracelet', 'Tenuto', 'Cryoseism'])
 builder.readitem(['Breakdown', 'Far Cosmos', 'Anxiolytic', 'Slayer', 'Diamond Hydro Ring', 'Diamond Solar Ring', 'Euouae', 'Tenuto', 'Az'])
 end = time.time()
-print(f'---------\n\nLoad time of 5 builds (average): {(end - start) / 5}')
+print(f'---------\n\nLoad time of 5 builds (average) with hpp algo: {(end - start) / 5}')
+
+start = time.time()
+builder2.readitem(['Corsair', 'Golden Scarab', 'Demon Tide', 'Hephaestus-Forged Sabatons', 'Yang', 'Diamond Static Ring', 'Diamond Static Bracelet', 'Tenuto', 'Cataclysm'])
+builder2.readitem(['Brainwash', 'Sparkling Plate', 'Stalactite', 'Flashing Boots', 'Moon Pool Circlet', 'Diamond Fiber Ring', 'Momentum', 'Tenuto', 'Grandmother'])
+builder2.readitem(['Albacore', 'Insulated Plate Mail', 'Demon Tide', 'Paradox', 'Cold Wave', 'Yang', "Dragon's Eye Bracelet", 'Diamond Hydro Necklace', 'Pure'])
+builder2.readitem(['Cumulonimbus', 'Medeis', 'Adrenaline', 'Paradox', 'Yang', 'Yang', 'Diamond Hydro Bracelet', 'Tenuto', 'Cryoseism'])
+builder2.readitem(['Breakdown', 'Far Cosmos', 'Anxiolytic', 'Slayer', 'Diamond Hydro Ring', 'Diamond Solar Ring', 'Euouae', 'Tenuto', 'Az'])
+end = time.time()
+print(f'---------\n\nLoad time of 5 builds (average) with original algo: {(end - start) / 5}')
+
+
